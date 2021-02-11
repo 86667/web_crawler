@@ -12,9 +12,13 @@ async fn main() {
     // let html = fs::read_to_string("test_data/monzo.txt").unwrap();
     // search_for_links(&html)
 
-    let tasks = vec!(Task::TaskTester(1),Task::TaskTester(2),Task::TaskTester(3),Task::TaskTester(4));
+    let tasks = vec!(
+        Task::new("a".to_string()),
+        Task::new("aa".to_string()),
+        Task::new("aaa".to_string()),
+        Task::new("aaaa".to_string()));
 
-    let scheduler = Scheduler::new(tasks);
+    let mut scheduler = Scheduler::new(tasks);
     scheduler.run_tasks().await;
 }
 
