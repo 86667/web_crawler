@@ -50,17 +50,17 @@ impl Scheduler {
 
     // Loop through new tasks and add to queue
     fn handle_received_data(&mut self, data: (Task, Vec<Task>)) {
-        println!("data returned: {:?}", data);
+        // println!("\n\nData returned. Process: {:?}", data);
         let (task_complete, mut tasks_todo) = data;
 
         // Loop through tasks and:
         //      -Mark completed task as complete (status=2)
         //      -if task in tasks_todo exists, remove it from tasks_todo
         for task in &mut self.tasks {
-            if task.item == task_complete.item {
+            if task.sub_domain == task_complete.sub_domain {
                 task.status=2
             };
-            tasks_todo.retain(|task_todo| task.item!=task_todo.item);
+            tasks_todo.retain(|task_todo| task.sub_domain!=task_todo.sub_domain);
         }
 
         // Add new tasks
@@ -73,10 +73,10 @@ impl Scheduler {
             if task.status==0 {
                 spawn_worker(task.clone(), tx.clone(), self.test);
                 task.status=1;
+                // println!("Started new task: {:?}", task);
             }
-            println!("Started new task: {:?}", task);
         }
-        println!("tasks: {:?}",self.tasks);
+        // println!("\nTasks list: {:?}",self.tasks);
     }
 
 }
@@ -107,8 +107,8 @@ mod tests {
     fn test_dup_tasks() {
         // "a" will return a test "aa" which should be ignored becasue it is already in list
         let tasks = vec!(
-            Task::new("a".to_string()),
-            Task::new("aa".to_string())
+            Task::new("domain".to_string(), "a".to_string()),
+            Task::new("domain".to_string(), "aa".to_string())
         );
         let mut scheduler = Scheduler::new(tasks, 50, true);
         aw!(scheduler.run_tasks());
@@ -124,10 +124,10 @@ mod tests {
         // Since "a" and "ccc" have odd number of characters we expect "aa" and "cccc" to be completed
         // along with all other tasks
         let tasks = vec!(
-            Task::new("a".to_string()),
-            Task::new("bb".to_string()),
-            Task::new("ccc".to_string()),
-            Task::new("dddd".to_string()));
+            Task::new("domain".to_string(), "a".to_string()),
+            Task::new("domain".to_string(), "bb".to_string()),
+            Task::new("domain".to_string(), "ccc".to_string()),
+            Task::new("domain".to_string(), "dddd".to_string()));
 
         let mut scheduler = Scheduler::new(tasks, 50, true);
         aw!(scheduler.run_tasks());
@@ -140,10 +140,10 @@ mod tests {
 
         // All odd number of chars so expect double the number of tasks back
         let tasks = vec!(
-            Task::new("a".to_string()),
-            Task::new("b".to_string()),
-            Task::new("c".to_string()),
-            Task::new("d".to_string()));
+            Task::new("domain".to_string(), "a".to_string()),
+            Task::new("domain".to_string(), "b".to_string()),
+            Task::new("domain".to_string(), "c".to_string()),
+            Task::new("domain".to_string(), "d".to_string()));
         let mut scheduler = Scheduler::new(tasks, 50, true);
         aw!(scheduler.run_tasks());
         assert_eq!(scheduler.tasks.len(), 8);
@@ -151,10 +151,10 @@ mod tests {
 
         // All even number of chars so expect same number of tasks back
         let tasks = vec!(
-            Task::new("aa".to_string()),
-            Task::new("bb".to_string()),
-            Task::new("cc".to_string()),
-            Task::new("dd".to_string()));
+            Task::new("domain".to_string(), "aa".to_string()),
+            Task::new("domain".to_string(), "bb".to_string()),
+            Task::new("domain".to_string(), "cc".to_string()),
+            Task::new("domain".to_string(), "dd".to_string()));
         let mut scheduler = Scheduler::new(tasks, 50, true);
         aw!(scheduler.run_tasks());
         assert_eq!(scheduler.tasks.len(), 4);
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn test_empty_task() {
         let tasks = vec!(
-            Task::new("".to_string()));
+            Task::new("domain".to_string(), "".to_string()));
         let mut scheduler = Scheduler::new(tasks, 50, true);
         aw!(scheduler.run_tasks());
         assert_eq!(scheduler.tasks.len(), 1);
@@ -174,10 +174,10 @@ mod tests {
     #[test]
     fn test_no_loop_delay() {
         let tasks = vec!(
-            Task::new("aa".to_string()),
-            Task::new("bb".to_string()),
-            Task::new("cc".to_string()),
-            Task::new("dd".to_string()));
+            Task::new("domain".to_string(), "aa".to_string()),
+            Task::new("domain".to_string(), "bb".to_string()),
+            Task::new("domain".to_string(), "cc".to_string()),
+            Task::new("domain".to_string(), "dd".to_string()));
         let mut scheduler = Scheduler::new(tasks, 0, true);
         aw!(scheduler.run_tasks());
         assert_eq!(scheduler.tasks.len(), 4);

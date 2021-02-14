@@ -1,22 +1,23 @@
 use crate::task::Task;
 
-use regex::Regex;
 use std::sync::mpsc;
-use std::fs;
-
 use std::thread;
 use std::time::Duration;
 use std::iter::repeat;
+#[allow(unused_imports)]
+use std::fs;
 
 use rand;
 use rand::thread_rng;
 use rand::Rng;
 
+use regex::Regex;
 use reqwest;
 
-const REGEX: &str = r#"^(?:https?://)?(?:w{3}.)?/?(.*)$"#;
+// REGEX captures paths that follow a domain URL
+const REGEX: &str = r####"^.*(?:https?://)?(?:w{3}.)?/(.*)[\\"'](?:[>])?(?:\n)?.*$"####;
 
-/// Worker pulls a given webpage and returns all instances of a provided REGEX.
+/// Worker pulls a given webpage and returns all instances of a provided REGEX
 pub struct Worker {
     regex: Regex,
     task: Task,
@@ -28,7 +29,7 @@ impl Worker {
     pub fn new(task: Task, tx: mpsc::Sender<(Task, Vec<Task>)>, test: bool) -> Self {
         // insert domain into REGEX capture string
         let mut regex = String::from(REGEX);
-        regex.insert_str(25, &task.item);
+        regex.insert_str(27, &task.domain);
 
         Worker{
             regex: Regex::new(&regex).unwrap(),
@@ -42,7 +43,7 @@ impl Worker {
         match self.test {
             false => {
                 // Fetch website
-                let res = self.get_html(&self.task.item);
+                let res = self.get_html(&self.task.get_url());
                 match res {
                     Ok(html) => {
                         // Pull out links
@@ -68,16 +69,20 @@ impl Worker {
             Ok(resp) => resp,
             Err(e) => {
                 if e.is_builder() {
-                    let mut url_with_base = String::from("http://");
+                    // Add Url Base if necessary
+                    let mut url_with_base = String::from("https://");
                     url_with_base.insert_str(7, url);
-                    reqwest::blocking::get(&url_with_base).unwrap();
+                    let resp = reqwest::blocking::get(&url_with_base).unwrap();
+                    return Ok(resp.text().unwrap())
+                } else {
+                    return Err(Box::new(e))
                 }
-                return Err(Box::new(e))
             }
         };
         Ok(resp.text().unwrap())
     }
 
+    // Mock GET request with test data
     // fn get_html(&self, url: &str) -> Result<String, std::io::Error> {
     //     fs::read_to_string("test_data/test_5_instances.txt")
     // }
@@ -85,10 +90,17 @@ impl Worker {
 
     /// Iterate through string pulling out each instance captured by this.regex
     pub fn search_for_links(&self, html: String) -> Vec<Task>{
-        html.split_whitespace()
-            .filter(|item| self.is_link_regex(&item).is_some())
-            .map(|item| Task::new(item.to_owned()))
-            .collect()
+        let new_tasks: Vec<Task> = html.split_whitespace()
+            .filter_map(|item| self.is_link_regex(&item))
+            .map(|item| Task::new(self.task.domain.clone(), item.to_owned()))
+            .collect();
+        if new_tasks.len() > 0 {
+            println!("\nUrl {:?} \nFound links:", self.task.get_url());
+            for new_task in &new_tasks {
+                println!("{:?}", new_task.get_url());
+            }
+        }
+        new_tasks
     }
 
     // Apply capture REGEX
@@ -105,11 +117,11 @@ impl Worker {
 //  Count number of chars in task item and +1. If even return new task with chars+1 number of characters.
 fn test_worker(task: Task, tx: mpsc::Sender<(Task, Vec<Task>)>) {
     thread::sleep(Duration::from_millis(thread_rng().gen_range(0..1000) as u64));
-    let mut num_chars: usize = task.item.len();
+    let mut num_chars: usize = task.sub_domain.len();
     num_chars+=1;
     if num_chars%2==0 {
-        let new_item = repeat(task.clone().item.chars().nth(0).unwrap()).take(num_chars).collect::<String>();
-        tx.send((task.to_owned(),vec!(Task::new(new_item)))).unwrap();
+        let new_item = repeat(task.clone().sub_domain.chars().nth(0).unwrap()).take(num_chars).collect::<String>();
+        tx.send((task.to_owned(),vec!(Task::new(task.domain, new_item)))).unwrap();
     } else {
         tx.send((task,vec!())).unwrap();
     }
@@ -122,36 +134,46 @@ mod tests {
 
     fn spawn_worker() -> Worker {
         let (tx, _) = mpsc::channel();
-        let task = Task::new("monzo.com".to_string());
+        let task = Task::new("monzo.com".to_string(), "".to_string());
         Worker::new(task, tx, true)
     }
 
     #[test]
     fn test_regex_gen() {
         let (tx, _) = mpsc::channel();
-        let task = Task::new("domain.com".to_string());
+        let task = Task::new("domain.com".to_string(),"aa".to_string());
         let worker = Worker::new(task, tx, true);
-        assert_eq!(worker.regex.to_string(), "^(?:https?://)?(?:w{3}.)?domain.com/?(.*)$");
+        assert_eq!(worker.regex.to_string(), "^.*(?:https?://)?(?:w{3}.)?domain.com/(.*)[\\\\\"\'](?:[>])?(?:\\n)?.*$");
     }
 
     #[test]
-    fn test_regex() {
+    fn test_regex_all() {
         let worker = spawn_worker();
-        assert_eq!(worker.is_link_regex("monzo.com/path"), Some("path".to_string()));
-        assert_eq!(worker.is_link_regex("monzo.com/monzo.com"), Some("monzo.com".to_string()));
-        assert_eq!(worker.is_link_regex("monzo.com//path"), Some("/path".to_string()));
-        assert_eq!(worker.is_link_regex("www.monzo.com/path"), Some("path".to_string()));
-        assert_eq!(worker.is_link_regex("http://www.monzo.com/path"), Some("path".to_string()));
-        assert_eq!(worker.is_link_regex("https://www.monzo.com/path"), Some("path".to_string()));
-        assert_eq!(worker.is_link_regex("http://monzo.com/path"), Some("path".to_string()));
-        assert_eq!(worker.is_link_regex("https://monzo.com/path"), Some("path".to_string()));
+        // After path
+        assert_eq!(worker.is_link_regex("monzo.com/path\""), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("monzo.com/path\"\n"), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("monzo.com/path\">"), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("monzo.com/path\">\n"), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("monzo.com/path\'"), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("monzo.com/path\'>"), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("monzo.com/path\"aaa"), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("monzo.com/path\">!!"), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("monzo.com/path\","), Some("path".to_string()));
+        // before path
+        assert_eq!(worker.is_link_regex("monzo.com//path\""), Some("/path".to_string()));
+        assert_eq!(worker.is_link_regex("www.monzo.com/path\""), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("http://www.monzo.com/path\""), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("https://www.monzo.com/path\""), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("http://monzo.com/path\""), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("https://monzo.com/path\""), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("link=monzo.com/path\""), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("2134https://monzo.com/path\""), Some("path".to_string()));
+        assert_eq!(worker.is_link_regex("ww.https://www.monzo.com/path\""), Some("path".to_string()));
 
-        assert_eq!(worker.is_link_regex("ww.monzo.com/path"), None);
-        assert_eq!(worker.is_link_regex(".monzo.com/path"), None);
-        assert_eq!(worker.is_link_regex("wwwmonzo.com/path"), None);
-        assert_eq!(worker.is_link_regex("monzo.cm/path"), None);
-        assert_eq!(worker.is_link_regex("monzo.cm/path"), None);
-        assert_eq!(worker.is_link_regex("monzo.cpm//path"), None);
+        // failures
+        assert_eq!(worker.is_link_regex("monzo.cm/path\""), None);
+        assert_eq!(worker.is_link_regex("monzo.cm/path\""), None);
+        assert_eq!(worker.is_link_regex("monzo.cpm//path\""), None);
     }
 
     #[test]
